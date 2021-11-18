@@ -131,7 +131,7 @@ def main(args):
 
 if __name__ == '__main__':
     args = argparse.ArgumentParser(description= 'parse for POENet')
-    args.add_argument('--batch_size', default= 128, type=int,
+    args.add_argument('--batch_size', default= 1024*8, type=int,
                     help='batch_size')
     args.add_argument('--data_path', default= './data/2dim_log_spiral',type=str,
                     help='path to data')
