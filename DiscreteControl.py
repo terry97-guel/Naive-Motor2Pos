@@ -18,7 +18,7 @@ def input2lossfn(model,target_pos):
     return input2loss
 
 def main(args):
-    weight = torch.load('./output/1117/checkpoint_50.pth')
+    weight = torch.load(args.data_path)
     input_dim = weight['input_dim']
 
     model = Model(input_dim)
@@ -51,7 +51,7 @@ def main(args):
     OutputTxt = np.array([])
     OutputTxt = np.append(OutputTxt, model(input).detach().numpy())
     OutputTxt = np.append(OutputTxt, input.squeeze(0).numpy())
-    # np.savetxt(args.save_dir,OutputTxt)
+    np.savetxt(args.save_dir,OutputTxt)
     print(OutputTxt)
     print(target_pos)
     
@@ -67,6 +67,7 @@ if __name__ == '__main__':
     args.add_argument('--ny', default= 0.01, type=float,
                     help='step size for input #2')
     args.add_argument('--save_dir', default='./2Visualize')
+    args.add_argument('--data_path', default='./output/1117/checkpoint_50.pth')
     args = args.parse_args()
     main(args)
 
