@@ -55,8 +55,8 @@ class FoldToyDataset(Dataset):
                     file_path = path_temp + '/' + scenario
                     assert(os.path.isfile(file_path))
                     rawdata = np.loadtxt(file_path)
-                    self.label = torch.cat((self.label,torch.Tensor(rawdata[:,:3])),0)
-                    self.input = torch.cat((self.input,torch.Tensor(rawdata[:,3:])),0)
+                    self.label = torch.cat((self.label,torch.Tensor(rawdata[:,:-2])),0)
+                    self.input = torch.cat((self.input,torch.Tensor(rawdata[:,-2:])),0)
 
     def __len__(self):
         return len(self.input)
