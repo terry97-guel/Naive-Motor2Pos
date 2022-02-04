@@ -18,12 +18,12 @@ class Model(nn.Module):
         self.layer6 = nn.Linear(256,512)
         torch.nn.init.xavier_uniform_(self.layer6.weight)
 
-        self.layer11 = nn.Linear(512,512)
-        torch.nn.init.xavier_uniform_(self.layer11.weight)
-        self.layer12 = nn.Linear(512,512)
-        torch.nn.init.xavier_uniform_(self.layer12.weight)
-        self.layer13 = nn.Linear(512,512)
-        torch.nn.init.xavier_uniform_(self.layer13.weight)
+        # self.layer11 = nn.Linear(512,512)
+        # torch.nn.init.xavier_uniform_(self.layer11.weight)
+        # self.layer12 = nn.Linear(512,512)
+        # torch.nn.init.xavier_uniform_(self.layer12.weight)
+        # self.layer13 = nn.Linear(512,512)
+        # torch.nn.init.xavier_uniform_(self.layer13.weight)
         self.layer14 = nn.Linear(512,256)
         torch.nn.init.xavier_uniform_(self.layer14.weight)
         
@@ -33,7 +33,7 @@ class Model(nn.Module):
         torch.nn.init.xavier_uniform_(self.layer8.weight)
         self.layer9 = nn.Linear(64,32)
         torch.nn.init.xavier_uniform_(self.layer9.weight)
-        self.layer10 = nn.Linear(32,3)
+        self.layer10 = nn.Linear(32,15)
         torch.nn.init.xavier_uniform_(self.layer10.weight)
 
 
@@ -56,12 +56,12 @@ class Model(nn.Module):
         out = self.layer6(out)
         out = nn.LeakyReLU()(out)
 
-        out = self.layer11(out)
-        out = nn.LeakyReLU()(out)
-        out = self.layer12(out)
-        out = nn.LeakyReLU()(out)
-        out = self.layer13(out)
-        out = nn.LeakyReLU()(out)
+        # out = self.layer11(out)
+        # out = nn.LeakyReLU()(out)
+        # out = self.layer12(out)
+        # out = nn.LeakyReLU()(out)
+        # out = self.layer13(out)
+        # out = nn.LeakyReLU()(out)
         out = self.layer14(out)
         out = nn.LeakyReLU()(out)
         
