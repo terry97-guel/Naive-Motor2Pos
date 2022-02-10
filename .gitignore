@@ -1,3 +1,14 @@
+# model checkpoint
+checkpoint_*
+
+# wandb
+wandb/*
+
+# run file
+foldtest1.sh
+foldtest2.sh
+run.sh
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
