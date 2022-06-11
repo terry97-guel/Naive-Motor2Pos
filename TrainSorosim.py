@@ -22,285 +22,229 @@ torch.backends.cudnn.benchmark = False
 np.random.seed(SEED)
 random.seed(SEED)
 
-
-            
-    
-def train_epoch(model, optimizer, input, label,Loss_Fn, args):
+def TrainEpoch(model, optimizer, input, label):
     # forward model
     output = model(input)
-    
-    # get Pos_loss
-    Pos_loss = Loss_Fn(output,label)
-
+    # get posLoss
+    posLoss = torch.nn.MSELoss()(output,label)
     # sum total loss
-    total_loss = Pos_loss
-    
+    total_loss = posLoss
+    # Optimizer Step
     optimizer.zero_grad()
     total_loss.backward()
     optimizer.step()
+    return posLoss
 
-    return Pos_loss
-
-def test_epoch(model, input, label, Loss_Fn, args):
-    # forward model
-    output = model(input)
-    
-    # get Pos_loss
-    Pos_loss = Loss_Fn(output,label)
-
-    return Pos_loss
+def TestEpoch(model, input, label):
+    with torch.no_grad():
+        # forward model
+        output = model(input)
+        # get posLoss
+        posLoss = torch.nn.MSELoss()(output,label)
+        return posLoss
 
 def main(args):
-
-    #Print args
+    ### Set logger ###
+    if args.WANDB:
+        wandb.init(project = args.pname)
+        wandb.run.name = os.path.split(args.saveDir)[-1]
+        
+    ### Print args ###
     print("Reading args...")
     command = ' '.join(sys.argv)
     print(command)
 
-    #set logger
-    if args.wandb:
-        wandb.init(project = args.pname)
-        wandb.run.name = os.path.split(args.save_dir)[-1]
+    device = torch.device('cuda:'+args.device)
+    torch.cuda.set_device(device)
 
-    if torch.cuda.is_available():
-        #set device
-        # os.environ["CUDA_VISIBLE_DEVICES"]=args.device
-        device = torch.device('cuda:'+args.device)
-        torch.cuda.set_device(device)
-    else:
-        device = torch.device('cpu:0')
-        torch.cuda.set_device(device)
+    ### Set model ###
+    IOScale = JsonDataset(os.path.join(args.dataPath,'trainInterpolate.json')).GetIOScale(device)
+    input_dim,output_dim = JsonDataset(os.path.join(args.dataPath,'trainInterpolate.json')).GetDataDimension()
+    model = Model(input_dim,output_dim,args.nLayers,args.activation)
 
-    #set model
-    model = Model(args.input_dim)
-    model = model.to(device)
-
-    #load weight when requested
-    if os.path.isfile(args.resume_dir):
-        weight = torch.load(args.resume_dir)
+    ### Load weight when requested ###
+    if os.path.isfile(args.resumeDir):
+        weight = torch.load(args.resumeDir,map_location=device)
         model.load_state_dict(weight['state_dict'])
-        model.IOScale = weight['IOScale']
+        IOScale = weight['IOScale']
         print("loading successful!")
     else:
         print("Nothing to load, Starting from scratch")
-
-    print(model)
-
-    #set optimizer
+    model.IOScale = IOScale
+    model = model.to(device)
+    
+    ### Set optimizer ###
     optimizer = torch.optim.Adam(model.parameters(),lr= args.lr, weight_decay=args.wd, betas=(0.5,0.9))
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer=optimizer,
                                         lr_lambda=lambda epoch: args.lrd ** epoch,
                                         last_epoch=-1,
                                         verbose=False)
 
-    #declare loss function
-    if args.loss_function == 'Pos_norm2':
-        Loss_Fn = Pos_norm2
-    else:
-        print("Invalid loss_function")
-        exit(0)
-    
-
-    #assert path to save model
-    pathname = args.save_dir
+    ### Assert path to save model ###
+    pathname = args.saveDir
     Path(pathname).mkdir(parents=True, exist_ok=True)
 
-    #set dataloader
+    ### Set dataloader ###
     print("Setting up dataloader")
-
-    if model.IOScale == None:       #if model has no IOScale setup, get it from Traindataset
-        print('No IOScale Found. Fetching Scale rate from Train dataset')
-        model.IOScale = ToyDataset(os.path.join(args.data_path,'train')).getIOScale()
-
-    IOScale = model.IOScale
-
-    train_data_loader       =   ToyDataloader(os.path.join(args.data_path,'train'), IOScale, args.n_workers, args.batch_size)
-    test_data_loader        =   ToyDataloader(os.path.join(args.data_path,'test' ), IOScale, args.n_workers, 8*args.batch_size)
-    
-    proxy_extrapolation     =   ToyDataloader(os.path.join(args.data_path,'proxy_extrapolation' ), IOScale, args.n_workers, args.batch_size)
-    distant_extrapolation   =   ToyDataloader(os.path.join(args.data_path,'distant_extrapolation' ), IOScale, args.n_workers, args.batch_size)
-
+    trainInterpolation  = JsonDataloader(os.path.join(args.dataPath,'trainInterpolate.json'), args.n_workers, args.batchSize,dataRatio=0.5)
+    valInterpolation    = JsonDataloader(os.path.join(args.dataPath,'valInterpolate.json' ), args.n_workers, 8*args.batchSize,dataRatio=1)
+    testInterpolation   = JsonDataloader(os.path.join(args.dataPath,'testInterpolate.json' ), args.n_workers, 8*args.batchSize,dataRatio=1)
+    testExtrapolation   = JsonDataloader(os.path.join(args.dataPath,'testExtrapolate.json' ), args.n_workers, 8*args.batchSize)
 
     print("Initalizing Training loop")
     for epoch in range(args.epochs):
-        # Timer start
+        # Timer start #
         if (epoch)%10 == 0:
             time_start = time.time()
 
-        # Train
+        # Train #
         model.train()
-        data_length = len(train_data_loader)
-        train_loss = np.array([])
-        train_Pos_loss = np.array([])
-
-
-        for iterate, (input,label) in enumerate(train_data_loader):
+        data_length = len(trainInterpolation)
+        trainPosLoss = np.array([])
+        for iterate, (input,label) in enumerate(trainInterpolation):
             input = input.to(device)
             label = label.to(device)
 
-            Pos_loss = train_epoch(model, optimizer, input, label, Loss_Fn, args)
-            total_loss = Pos_loss
+            posLoss = TrainEpoch(model, optimizer, input, label)
 
             # metric to plot
-            train_loss = np.append(train_loss, Pos_loss.detach().cpu().numpy())
-            train_Pos_loss = np.append(train_Pos_loss, Pos_loss.detach().cpu().numpy())
-            
-            print('Epoch:{}, Pos_loss:{:.2f}, Progress:{:.2f}%'.format(epoch+1,Pos_loss,100*iterate/data_length), end='\r')
+            trainPosLoss = np.append(trainPosLoss, posLoss.detach().cpu().numpy())
+            print('Epoch:{}, posLoss:{:.2f}, Progress:{:.2f}%'.format(epoch+1,posLoss,100*iterate/data_length), end='\r')
 
-        train_loss = train_loss.mean()
-        train_avg_Pos_loss = train_Pos_loss.mean()
-        train_max_Pos_loss = train_Pos_loss.max()
-        print('TrainLoss:{:.2f}'.format(train_loss))
-        
-        # Log to wandb
-        if args.wandb:
-            wandb.log({'Train_avg_Pos_loss':train_avg_Pos_loss, 'Train_max_Pos_loss':train_max_Pos_loss,
+        trainPosLoss, trainMaxPosLoss = trainPosLoss.mean(), trainPosLoss.max()
+        print('TrainLoss:{:.2f}'.format(trainPosLoss))
+        # Log to wandb #
+        if args.WANDB:
+            wandb.log({'trainPosLoss':trainPosLoss, 'trainMaxPosLoss':trainMaxPosLoss,
             },step = epoch+1)
 
-        #Evaluate
-        if (epoch+1)%10 == 0:
+        # Evaluate on ValidationSet #
+        if (epoch+1)%args.TestPeriod == 0:
             model.eval()
-            data_length = len(test_data_loader)
-            test_loss = np.array([])
-            test_Pos_loss = np.array([])
-            for iterate, (input,label) in enumerate(test_data_loader):
+            data_length = len(valInterpolation)
+            valPosLoss = np.array([])
+            for iterate, (input,label) in enumerate(valInterpolation):
                 input = input.to(device)
                 label = label.to(device)
-                Pos_loss = test_epoch(model, input, label, Loss_Fn, args)
-                total_loss = Pos_loss 
+                posLoss = TestEpoch(model, input, label)
 
                 # metric to plot
-                test_loss = np.append(test_loss, total_loss.detach().cpu().numpy())
-                test_Pos_loss = np.append(test_Pos_loss, Pos_loss.detach().cpu().numpy())
-        
-                print('Testing...{:.2f} Epoch:{}, Progress:{:.2f}%'.format(Pos_loss,epoch+1,100*iterate/data_length) , end='\r')
+                valPosLoss = np.append(valPosLoss, posLoss.detach().cpu().numpy())
+                print('Validatiing...{:.2f} Epoch:{}, Progress:{:.2f}%'.format(posLoss,epoch+1,100*iterate/data_length) , end='\r')
             
-            test_loss = test_loss.mean()
-            avg_Pos_loss = test_Pos_loss.mean()
-            max_Pos_loss = test_Pos_loss.max()
-            print('TestLoss:{:.2f}'.format(test_loss))
-
-            # Log to wandb
-            if args.wandb:
-                wandb.log({'avg_Pos_loss':avg_Pos_loss,'max_Pos_loss':max_Pos_loss,
+            valPosLoss, valMaxPosLoss = valPosLoss.mean(), valPosLoss.max()
+            print('ValLoss:{:.2f}'.format(valPosLoss))
+            # Log to wandb #
+            if args.WANDB:
+                wandb.log({'InterpolateValPosLoss':valPosLoss,'InterpolateValMaxPosLoss':valMaxPosLoss,
                 },step = epoch+1)
-
-        #Evaluate on proxy
-        if (epoch+1)%10 == 0:
+                
+        # Evaluate on Test set #
+        if (epoch+1)%args.TestPeriod == 0:
             model.eval()
-            data_length = len(proxy_extrapolation)
-            test_loss = np.array([])
-            test_Pos_loss = np.array([])
-            for iterate, (input,label) in enumerate(proxy_extrapolation):
+            data_length = len(testInterpolation)
+            testPosLoss = np.array([])
+            for iterate, (input,label) in enumerate(testInterpolation):
                 input = input.to(device)
                 label = label.to(device)
-                Pos_loss = test_epoch(model, input, label, Loss_Fn, args)
-                total_loss = Pos_loss 
+                posLoss = TestEpoch(model, input, label)
 
                 # metric to plot
-                test_loss = np.append(test_loss, total_loss.detach().cpu().numpy())
-                test_Pos_loss = np.append(test_Pos_loss, Pos_loss.detach().cpu().numpy())
-                
-                print('ProxyTesting...{:.2f} Epoch:{}, Progress:{:.2f}%'.format(Pos_loss,epoch+1,100*iterate/data_length) , end='\r')
+                testPosLoss = np.append(testPosLoss, posLoss.detach().cpu().numpy())
+                print('Testing...{:.2f} Epoch:{}, Progress:{:.2f}%'.format(posLoss,epoch+1,100*iterate/data_length) , end='\r')
             
-            test_loss = test_loss.mean()
-            avg_Pos_loss = test_Pos_loss.mean()
-            max_Pos_loss = test_Pos_loss.max()
-            print('TestLoss:{:.2f}'.format(test_loss))
-
-            # Log to wandb
-            if args.wandb:
-                wandb.log({'proxy_avg_Pos_loss':avg_Pos_loss,'proxy_max_Pos_loss':max_Pos_loss,
+            testPosLoss, testMaxPosLoss = testPosLoss.mean(), testPosLoss.max()
+            print('TestLoss:{:.2f}'.format(testPosLoss))
+            # Log to wandb #
+            if args.WANDB:
+                wandb.log({'InterpolateTestPosLoss':testPosLoss,'InterpolateTestMaxPosLoss':testMaxPosLoss,
                 },step = epoch+1)
-
-        #Evaluate on distant
-        if (epoch+1)%10 == 0:
+                
+        # Evaluate on Extrapolation #
+        if (epoch+1)%args.TestPeriod == 0:
             model.eval()
-            data_length = len(distant_extrapolation)
-            test_loss = np.array([])
-            test_Pos_loss = np.array([])
-            for iterate, (input,label) in enumerate(distant_extrapolation):
+            data_length = len(testExtrapolation)
+            testPosLoss = np.array([])
+            for iterate, (input,label) in enumerate(testExtrapolation):
                 input = input.to(device)
                 label = label.to(device)
-                Pos_loss = test_epoch(model, input, label, Loss_Fn, args)
-                total_loss = Pos_loss 
+                posLoss = TestEpoch(model, input, label)
 
                 # metric to plot
-                test_loss = np.append(test_loss, total_loss.detach().cpu().numpy())
-                test_Pos_loss = np.append(test_Pos_loss, Pos_loss.detach().cpu().numpy())
-                
-                print('DistantTesting...{:.2f} Epoch:{}, Progress:{:.2f}%'.format(Pos_loss,epoch+1,100*iterate/data_length) , end='\r')
-            
-            test_loss = test_loss.mean()
-            avg_Pos_loss = test_Pos_loss.mean()
-            max_Pos_loss = test_Pos_loss.max()
-            print('TestLoss:{:.2f}'.format(test_loss))
+                testPosLoss = np.append(testPosLoss, posLoss.detach().cpu().numpy())
+                print('Testing...{:.2f} Epoch:{}, Progress:{:.2f}%'.format(posLoss,epoch+1,100*iterate/data_length) , end='\r')
 
-            # Log to wandb
-            if args.wandb:
-                wandb.log({'distant_avg_Pos_loss':avg_Pos_loss,'distant_max_Pos_loss':max_Pos_loss,
+            testPosLoss, testMaxPosLoss = testPosLoss.mean(), testPosLoss.max()
+            print('TestLoss:{:.2f}'.format(testPosLoss))
+            # Log to wandb #
+            if args.WANDB:
+                wandb.log({'ExtraploateTestPosLoss':testPosLoss,'ExtraploateTestMaxPosLoss':testMaxPosLoss,
                 },step = epoch+1)
         
-        # Timer end
-        if (epoch+1)%10 == 0:    
+        # Timer end #
+        if (epoch+1)%args.TestPeriod == 0:    
             time_end = time.time()
             avg_time = time_end-time_start
-            eta_time = (args.epochs - epoch)/10 * avg_time
+            eta_time = (args.epochs - epoch)/args.TestPeriod * avg_time
             h = int(eta_time //3600)
             m = int((eta_time %3600)//60)
             s = int((eta_time %60))
-            print("Epoch: {}, TestLoss:{:.2f}, eta:{}:{}:{}".format(epoch+1, test_loss, h,m,s))
+            print("Epoch: {}, eta:{}:{}:{}".format(epoch+1, h,m,s))
         
-            # Log to wandb
-            if args.wandb:
+            # Log to wandb #
+            if args.WANDB:
                 wandb.log({'TimePerEpoch':avg_time},step = epoch+1)
 
-        #save model 
-        if (epoch+1) % args.save_period==0:
+        #save model #
+        if (epoch+1) % args.savePeriod==0:
             filename =  pathname + '/checkpoint_{}.pth'.format(epoch+1)
             print("saving... {}".format(filename))
             state = {
                 'state_dict':model.state_dict(),
                 'optimizer':optimizer.state_dict(),
-                'input_dim':args.input_dim,
-                'IOScale':model.IOScale
+                'input_dim':input_dim,
+                'IOScale':model.IOScale,
+                "nLayers":args.nLayers
             }
-            torch.save(state, filename)
+            # torch.save(state, filename)
 
         scheduler.step()
 
 
 if __name__ == '__main__':
     args = argparse.ArgumentParser(description= 'parse for POENet')
-    args.add_argument('--batch_size', default= 128, type=int,
+    args.add_argument('--batchSize', default= 32, type=int,
                     help='batch_size')
-    args.add_argument('--data_path', default= './data/SorosimGrid',type=str,
+    args.add_argument('--dataPath', default= './data/Sorosim4dof',type=str,
                     help='path to data')
-    args.add_argument('--save_dir', default= './output/temp',type=str,
+    args.add_argument('--saveDir', default= './output/temp',type=str,
                     help='path to save model')
-    args.add_argument('--resume_dir', default= './output/',type=str,
+    args.add_argument('--resumeDir', default= './output/',type=str,
                     help='path to load model')
     args.add_argument('--device', default= '1',type=str,
                     help='device to use')
     args.add_argument('--n_workers', default= 2, type=int,
                     help='number of data loading workers')
+    args.add_argument('--nLayers', default= 1, type=int,
+                    help='number layers')
+    args.add_argument('--activation', default= 'LRELU',type=str,
+                    help='')
     args.add_argument('--wd', default= 0.001, type=float,
                     help='weight_decay for model layer')
     args.add_argument('--lrd', default= 0.95, type=float,
                     help='weight_decay for model layer')
     args.add_argument('--lr', default= 0.01, type=float,
                     help='learning rate for model layer')
-    args.add_argument('--loss_function', default= 'Pos_norm2', type=str,
-                    help='get list of loss function')
-    args.add_argument('--wandb', action = 'store_true', help = 'Use wandb to log')
-    args.add_argument('--input_dim', default= 3, type=int,
-                    help='dimension of input')
+    args.add_argument('--WANDB', action = 'store_true', help = 'Use wandb to log')
     args.add_argument('--epochs', default= 100, type=int,
                     help='number of epoch to perform')
-    args.add_argument('--save_period', default= 100, type=int,
+    args.add_argument('--savePeriod', default= 50, type=int,
                     help='number of scenes after which model is saved')
-    args.add_argument('--pname', default= 'SorosimNaiveZero',type=str,
+    args.add_argument('--TestPeriod', default= 1, type=int,
+                    help='number of scenes after which model is Tested')
+    args.add_argument('--pname', default= 'NaiveNN with Sorosim Data',type=str,
                     help='Project name')
+    
     args = args.parse_args()
     main(args)
 #%%
